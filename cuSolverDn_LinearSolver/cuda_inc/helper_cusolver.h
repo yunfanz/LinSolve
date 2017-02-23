@@ -23,6 +23,20 @@
 
 #define SWITCH_CHAR             '-'
 
+
+void printArray(float *ptr, size_t length)            
+{         
+    //for statment to print values using array             
+    size_t i = 0;
+    for( ; i < length; ++i )  printf("%f \n", ptr[i]);        
+}  
+void printArray(double *ptr, size_t length)            
+{         
+    //for statment to print values using array             
+    size_t i = 0;
+    for( ; i < length; ++i )  printf("%f \n", ptr[i]);        
+}
+
 struct  testOpts {
     char *sparse_mat_filename;   // by switch -F<filename>
     const char *testFunc; // by switch -R<name>
