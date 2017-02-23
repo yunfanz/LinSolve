@@ -23,7 +23,27 @@
 
 #define SWITCH_CHAR             '-'
 
-
+void printMatrix(int m, int n, const double*A, int lda, const char* name) 
+{   
+    printf("%s \n", name);
+    for(int row = 0 ; row < m ; row++)
+    {
+        for(int col = 0 ; col < n ; col++)
+        { 
+            double Areg = A[row + col*lda]; 
+            printf("%.3f ", Areg); 
+            if (col == n-1) printf("\n") ;
+        } 
+    } 
+} 
+void checkMatrix(int m, int n, const double*A, int lda, const char* name)
+{
+    double* hA;
+    hA = (double*)malloc(sizeof(double)*m*n);
+    checkCudaErrors(cudaMemcpy(hA, A, sizeof(double)*m*n, cudaMemcpyDeviceToHost));
+    printMatrix(m, n, hA, m, name);
+    if (hA) free(hA);
+}
 void printArray(float *ptr, size_t length)            
 {         
     //for statment to print values using array             
@@ -35,6 +55,15 @@ void printArray(double *ptr, size_t length)
     //for statment to print values using array             
     size_t i = 0;
     for( ; i < length; ++i )  printf("%f \n", ptr[i]);        
+}
+void checkArray(double *ptr, size_t length, const char* name)
+{
+    printf("%s \n", name);
+    double* hp;
+    hp = (double*)malloc(sizeof(double)*length);
+    checkCudaErrors(cudaMemcpy(hp, ptr, sizeof(double)*length, cudaMemcpyDeviceToHost));
+    printArray(hp, length);
+    if (hp) free(hp);
 }
 
 struct  testOpts {

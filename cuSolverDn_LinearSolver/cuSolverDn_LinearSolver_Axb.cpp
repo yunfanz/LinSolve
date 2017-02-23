@@ -315,6 +315,108 @@ int linearSolverQR(
 }
 
 
+int linearSolverSVD(
+    cusolverDnHandle_t handle, 
+    int n,
+    const double *Acopy,
+    int lda,
+    const double *bcopy,
+    double *x)
+{
+    cublasHandle_t cublasHandle = NULL; // used in residual evaluation
+    int m = lda;
+    int bufferSize = 0;
+    int *info = NULL;
+    int h_info = 0;
+    double start, stop;
+    double time_solve;
+    const double one = 1.0;
+
+    // double U[lda*m]; // m-by-m unitary matrix 
+    // double VT[lda*n]; // n-by-n unitary matrix
+    // double S[n]; //singular value 
+    double *d_A = NULL; double *d_SI = NULL; 
+    double *d_b = NULL; double *d_S = NULL; 
+    double *d_U = NULL; double *d_VT = NULL; 
+    double *d_work = NULL; 
+    double *d_rwork = NULL; 
+    double *d_W = NULL; 
+    signed char jobu = 'A'; // all m columns of U 
+    signed char jobvt = 'A'; // all n columns of VT 
+    // step 1: create cusolverDn/cublas handle 
+    checkCudaErrors(cublasCreate(&cublasHandle)); 
+
+    checkCudaErrors(cudaMalloc((void**)&d_A , sizeof(double)*lda*n)); \
+    checkCudaErrors(cudaMalloc((void**)&d_b , sizeof(double)*m)); 
+    checkCudaErrors(cudaMalloc((void**)&d_S , sizeof(double)*n)); 
+    checkCudaErrors(cudaMalloc((void**)&d_SI , sizeof(double)*lda*n)); 
+    checkCudaErrors(cudaMalloc((void**)&d_U , sizeof(double)*lda*m)); 
+    checkCudaErrors(cudaMalloc((void**)&d_VT , sizeof(double)*lda*n)); 
+    checkCudaErrors(cudaMalloc((void**)&info, sizeof(int))); 
+    checkCudaErrors(cudaMalloc((void**)&d_W , sizeof(double)*lda*n));
+    checkCudaErrors(cudaMemcpy(d_A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice)); //gesvd destroys d_A on exit
+    checkCudaErrors(cudaMemcpy(d_b, bcopy, sizeof(double)*m, cudaMemcpyDeviceToDevice));
+
+    // checkMatrix(m, n , d_A, lda, "SVD_AtA");
+    // checkArray(d_b, m, "SVD_Atb");
+    checkCudaErrors(cusolverDnDgesvd_bufferSize( handle, m, n, &bufferSize ));
+    checkCudaErrors(cudaMalloc((void**)&d_work , sizeof(double)*bufferSize));
+
+    start = second();
+
+    checkCudaErrors(cusolverDnDgesvd( 
+        handle, jobu, jobvt, m, n, d_A, lda, d_S, d_U, lda, d_VT, lda, d_work, bufferSize, d_rwork, info));
+    //checkCudaErrors(cudaDeviceSynchronize());
+    // checkArray(d_S, n, "dS");
+    // checkCudaErrors(cudaMemcpy(U , d_U , sizeof(double)*lda*m, cudaMemcpyDeviceToHost)); 
+    // checkCudaErrors(cudaMemcpy(VT, d_VT, sizeof(double)*lda*n, cudaMemcpyDeviceToHost)); 
+    // checkCudaErrors(cudaMemcpy(S , d_S , sizeof(double)*n , cudaMemcpyDeviceToHost)); 
+    checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
+
+    if ( 0 != h_info ){
+        fprintf(stderr, "Error: SVD failed, check %d parameter\n", h_info);
+    }
+
+    // int BLOCK_DIM_X = 32; int BLOCK_DIM_Y = 32;
+    // dim3 blockDim(BLOCK_DIM_X, BLOCK_DIM_Y);  
+    // dim3 gridDim((n + BLOCK_DIM_X - 1) / BLOCK_DIM_X, (m + BLOCK_DIM_Y - 1) / BLOCK_DIM_Y);
+    // initSIGPU<<<gridDim, blockDim>>>(d_SI, d_S, m, n);
+    double epsilon = 1.e-9;
+    printf("epsilon = %f \n", epsilon);
+    int initStat = initSICPU(d_SI, d_S, m, n, epsilon);
+    // U*S*VT*x=b; x = V*Si*UT*b
+    // checkMatrix(m, n, d_SI, lda, "SVD_SI");
+    // checkMatrix(m, m, d_U, lda, "SVD_U");
+    // checkMatrix(n, n, d_VT, lda, "SVD_VT");
+    double al = 1.0;// al =1
+    double bet = 0.0;// bet =0
+    // checkArray(d_b, n, "db");
+    checkCudaErrors(cublasDgemv(cublasHandle,CUBLAS_OP_T, m, m, &al,d_U, m, d_b,1,&bet,d_b,1));
+    // checkArray(d_b, n, "dUtb");
+    checkCudaErrors(cublasDgemv(cublasHandle,CUBLAS_OP_N, m, n, &al,d_SI, m, d_b,1,&bet,d_b,1));
+    // checkArray(d_b, n, "dSiUtb");
+    checkCudaErrors(cublasDgemv(cublasHandle,CUBLAS_OP_T, n, n, &al,d_VT, n, d_b, 1,&bet,x,1));
+    checkCudaErrors(cudaDeviceSynchronize());
+    stop = second();
+    time_solve = stop - start; 
+    fprintf (stdout, "timing: SVD = %10.6f sec\n", time_solve);
+    // checkArray(x, 20, "d_x");
+
+    if (d_A ) cudaFree(d_A); 
+    if (d_S ) cudaFree(d_S); 
+    if (d_SI ) cudaFree(d_SI);
+    if (d_U ) cudaFree(d_U); 
+    if (d_VT ) cudaFree(d_VT); 
+    if (info) cudaFree(info); 
+    if (d_work ) cudaFree(d_work); 
+    if (d_rwork) cudaFree(d_rwork); 
+    if (d_W ) cudaFree(d_W); 
+    if (cublasHandle ) cublasDestroy(cublasHandle); 
+    // if (cusolverH) cusolverDnDestroy(cusolverH); 
+    return 0;
+
+
+}
 void parseCommandLineArguments(int argc, char *argv[], struct testOpts &opts)
 {
     memset(&opts, 0, sizeof(opts));
@@ -331,7 +433,7 @@ void parseCommandLineArguments(int argc, char *argv[], struct testOpts &opts)
 
         if (solverType)
         {
-            if ((STRCASECMP(solverType, "chol") != 0) && (STRCASECMP(solverType, "lu") != 0) && (STRCASECMP(solverType, "qr") != 0))
+            if ((STRCASECMP(solverType, "svd") != 0), (STRCASECMP(solverType, "chol") != 0) && (STRCASECMP(solverType, "lu") != 0) && (STRCASECMP(solverType, "qr") != 0))
             {
                 printf("\nIncorrect argument passed to -R option\n");
                 UsageDN();
@@ -441,11 +543,11 @@ int main (int argc, char *argv[])
 
     printf("sparse matrix A is %d x %d with %d nonzeros, base=%d\n", rowsA, colsA, nnzA, baseA);
 
-    // if ( rowsA != colsA )
-    // {
-    //     fprintf(stderr, "Error: only support square matrix\n");
-    //     exit(EXIT_FAILURE);
-    // }
+    if ( rowsA != colsA )
+    {
+        fprintf("only svd support non-square matrix\n");
+        // exit(EXIT_FAILURE);
+    }
 
     printf("step 2: convert CSR(A) to dense matrix\n");
 
@@ -528,7 +630,11 @@ int main (int argc, char *argv[])
 
     printf("step 5: solve A*x = b \n");
     // d_A and d_b are read-only
-    if ( 0 == strcmp(opts.testFunc, "chol") )
+    if ( 0 == strcmp(opts.testFunc, "svd") )
+    {
+        linearSolverSVD(handle, rowsA, d_A, lda, d_b, d_x);
+    }
+    else if ( 0 == strcmp(opts.testFunc, "chol") )
     {
         linearSolverCHOL(handle, rowsA, d_A, lda, d_b, d_x);
     }
