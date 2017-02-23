@@ -67,8 +67,8 @@ int loadMMSparseMatrix(
     int *n,
     int *nnz,
     T_ELEM **aVal,
-    int **aColInd,
     int **aRowInd,
+    int **aColInd,
     int extendSymMatrix);
 
 void UsageDN(void)
@@ -92,45 +92,45 @@ void UsageDN(void)
 int linearSolverCHOL(
     cusolverDnHandle_t handle,
     int n,
-    const double *Acopy,
+    const float *Acopy,
     int lda,
-    const double *b,
-    double *x)
+    const float *b,
+    float *x)
 {
     int bufferSize = 0;
     int *info = NULL;
-    double *buffer = NULL;
-    double *A = NULL;
+    float *buffer = NULL;
+    float *A = NULL;
     int h_info = 0;
-    double start, stop;
-    double time_solve;
+    float start, stop;
+    float time_solve;
     cublasFillMode_t uplo = CUBLAS_FILL_MODE_LOWER;
 
-    checkCudaErrors(cusolverDnDpotrf_bufferSize(handle, uplo, n, (double*)Acopy, lda, &bufferSize));
+    checkCudaErrors(cusolverDnSpotrf_bufferSize(handle, uplo, n, (float*)Acopy, lda, &bufferSize));
 
     checkCudaErrors(cudaMalloc(&info, sizeof(int)));
-    checkCudaErrors(cudaMalloc(&buffer, sizeof(double)*bufferSize));
-    checkCudaErrors(cudaMalloc(&A, sizeof(double)*lda*n));
+    checkCudaErrors(cudaMalloc(&buffer, sizeof(float)*bufferSize));
+    checkCudaErrors(cudaMalloc(&A, sizeof(float)*lda*n));
 
 
     // prepare a copy of A because potrf will overwrite A with L
-    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(float)*lda*n, cudaMemcpyDeviceToDevice));
     checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
 
     start = second();
     start = second();
 
-    checkCudaErrors(cusolverDnDpotrf(handle, uplo, n, A, lda, buffer, bufferSize, info));
+    checkCudaErrors(cusolverDnSpotrf(handle, uplo, n, A, lda, buffer, bufferSize, info));
 
     checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
 
     if ( 0 != h_info ){
-        fprintf(stderr, "Error: Cholesky factorization failed, check %d parameter\n", h_info);
+        fprintf(stderr, "Error: Cholesky factorization failed\n");
     }
 
-    checkCudaErrors(cudaMemcpy(x, b, sizeof(double)*n, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(x, b, sizeof(float)*n, cudaMemcpyDeviceToDevice));
 
-    checkCudaErrors(cusolverDnDpotrs(handle, uplo, n, 1, A, lda, x, n, info));
+    checkCudaErrors(cusolverDnSpotrs(handle, uplo, n, 1, A, lda, x, n, info));
 
     checkCudaErrors(cudaDeviceSynchronize());
     stop = second();
@@ -153,44 +153,44 @@ int linearSolverCHOL(
 int linearSolverLU(
     cusolverDnHandle_t handle,
     int n,
-    const double *Acopy,
+    const float *Acopy,
     int lda,
-    const double *b,
-    double *x)
+    const float *b,
+    float *x)
 {
     int bufferSize = 0;
     int *info = NULL;
-    double *buffer = NULL;
-    double *A = NULL;
+    float *buffer = NULL;
+    float *A = NULL;
     int *ipiv = NULL; // pivoting sequence
     int h_info = 0;
-    double start, stop;
-    double time_solve;
+    float start, stop;
+    float time_solve;
 
-    checkCudaErrors(cusolverDnDgetrf_bufferSize(handle, n, n, (double*)Acopy, lda, &bufferSize));
+    checkCudaErrors(cusolverDnSgetrf_bufferSize(handle, n, n, (float*)Acopy, lda, &bufferSize));
 
     checkCudaErrors(cudaMalloc(&info, sizeof(int)));
-    checkCudaErrors(cudaMalloc(&buffer, sizeof(double)*bufferSize));
-    checkCudaErrors(cudaMalloc(&A, sizeof(double)*lda*n));
+    checkCudaErrors(cudaMalloc(&buffer, sizeof(float)*bufferSize));
+    checkCudaErrors(cudaMalloc(&A, sizeof(float)*lda*n));
     checkCudaErrors(cudaMalloc(&ipiv, sizeof(int)*n));
 
 
     // prepare a copy of A because getrf will overwrite A with L
-    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(float)*lda*n, cudaMemcpyDeviceToDevice));
     checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
 
     start = second();
     start = second();
 
-    checkCudaErrors(cusolverDnDgetrf(handle, n, n, A, lda, buffer, ipiv, info));
+    checkCudaErrors(cusolverDnSgetrf(handle, n, n, A, lda, buffer, ipiv, info));
     checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
 
     if ( 0 != h_info ){
-        fprintf(stderr, "Error: LU factorization failed, check %d parameter\n", h_info);
+        fprintf(stderr, "Error: LU factorization failed\n");
     }
 
-    checkCudaErrors(cudaMemcpy(x, b, sizeof(double)*n, cudaMemcpyDeviceToDevice));
-    checkCudaErrors(cusolverDnDgetrs(handle, CUBLAS_OP_N, n, 1, A, lda, ipiv, x, n, info));
+    checkCudaErrors(cudaMemcpy(x, b, sizeof(float)*n, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cusolverDnSgetrs(handle, CUBLAS_OP_N, n, 1, A, lda, ipiv, x, n, info));
     checkCudaErrors(cudaDeviceSynchronize());
     stop = second();
 
@@ -213,28 +213,28 @@ int linearSolverLU(
 int linearSolverQR(
     cusolverDnHandle_t handle,
     int n,
-    const double *Acopy,
+    const float *Acopy,
     int lda,
-    const double *b,
-    double *x)
+    const float *b,
+    float *x)
 {
     cublasHandle_t cublasHandle = NULL; // used in residual evaluation
     int bufferSize = 0;
     int bufferSize_geqrf = 0;
     int bufferSize_ormqr = 0;
     int *info = NULL;
-    double *buffer = NULL;
-    double *A = NULL;
-    double *tau = NULL;
+    float *buffer = NULL;
+    float *A = NULL;
+    float *tau = NULL;
     int h_info = 0;
-    double start, stop;
-    double time_solve;
-    const double one = 1.0;
+    float start, stop;
+    float time_solve;
+    const float one = 1.0;
 
     checkCudaErrors(cublasCreate(&cublasHandle));
 
-    checkCudaErrors(cusolverDnDgeqrf_bufferSize(handle, n, n, (double*)Acopy, lda, &bufferSize_geqrf));
-    checkCudaErrors(cusolverDnDormqr_bufferSize(
+    checkCudaErrors(cusolverDnSgeqrf_bufferSize(handle, n, n, (float*)Acopy, lda, &bufferSize_geqrf));
+    checkCudaErrors(cusolverDnSormqr_bufferSize(
         handle,
         CUBLAS_SIDE_LEFT,
         CUBLAS_OP_T,
@@ -253,12 +253,12 @@ int linearSolverQR(
     bufferSize = (bufferSize_geqrf > bufferSize_ormqr)? bufferSize_geqrf : bufferSize_ormqr ; 
 
     checkCudaErrors(cudaMalloc(&info, sizeof(int)));
-    checkCudaErrors(cudaMalloc(&buffer, sizeof(double)*bufferSize));
-    checkCudaErrors(cudaMalloc(&A, sizeof(double)*lda*n));
-    checkCudaErrors(cudaMalloc ((void**)&tau, sizeof(double)*n));
+    checkCudaErrors(cudaMalloc(&buffer, sizeof(float)*bufferSize));
+    checkCudaErrors(cudaMalloc(&A, sizeof(float)*lda*n));
+    checkCudaErrors(cudaMalloc ((void**)&tau, sizeof(float)*n));
 
 // prepare a copy of A because getrf will overwrite A with L
-    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(A, Acopy, sizeof(float)*lda*n, cudaMemcpyDeviceToDevice));
 
     checkCudaErrors(cudaMemset(info, 0, sizeof(int)));
 
@@ -266,18 +266,18 @@ int linearSolverQR(
     start = second();
 
 // compute QR factorization
-    checkCudaErrors(cusolverDnDgeqrf(handle, n, n, A, lda, tau, buffer, bufferSize, info));
+    checkCudaErrors(cusolverDnSgeqrf(handle, n, n, A, lda, tau, buffer, bufferSize, info));
 
     checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
 
     if ( 0 != h_info ){
-        fprintf(stderr, "Error: LU factorization failed, check %d parameter\n", h_info);
+        fprintf(stderr, "Error: LU factorization failed\n");
     }
 
-    checkCudaErrors(cudaMemcpy(x, b, sizeof(double)*n, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(x, b, sizeof(float)*n, cudaMemcpyDeviceToDevice));
 
     // compute Q^T*b
-    checkCudaErrors(cusolverDnDormqr(
+    checkCudaErrors(cusolverDnSormqr(
         handle,
         CUBLAS_SIDE_LEFT,
         CUBLAS_OP_T,
@@ -294,7 +294,7 @@ int linearSolverQR(
         info));
 
     // x = R \ Q^T*b
-    checkCudaErrors(cublasDtrsm(
+    checkCudaErrors(cublasStrsm(
          cublasHandle,
          CUBLAS_SIDE_LEFT,
          CUBLAS_FILL_MODE_UPPER,
@@ -373,15 +373,15 @@ void parseCommandLineArguments(int argc, char *argv[], struct testOpts &opts)
     }
 }
 
-int is_symmetric(double* h_A, int colsA, int rowsA, int lda)
+int is_symmetric(float* h_A, int colsA, int rowsA, int lda)
 {
     int issym = 1;
     for(int j = 0 ; j < colsA ; j++)
     {
         for(int i = j ; i < rowsA ; i++)
         {
-            double Aij = h_A[i + j*lda];
-            double Aji = h_A[j + i*lda];
+            float Aij = h_A[i + j*lda];
+            float Aji = h_A[j + i*lda];
             if ( Aij != Aji )
             {
                 issym = 0;
@@ -412,34 +412,30 @@ int main (int argc, char *argv[])
     // CSR(A) from I/O
     int *h_csrRowPtrA = NULL;
     int *h_csrColIndA = NULL;
-    double *h_csrValA = NULL;
-    // CSC(A) from I/O
-    // int *h_cscColPtrA = NULL;
-    // int *h_cscRowIndA = NULL;
-    // double *h_cscValA = NULL;
+    float *h_csrValA = NULL;
 
-    double *h_A = NULL; // dense matrix from CSR(A)
-    double *h_x = NULL; // a copy of d_x
-    double *h_b = NULL; // b = ones(m,1)
-    double *h_r = NULL; // r = b - A*x, a copy of d_r
-    double *h_tr = NULL;
+    float *h_A = NULL; // dense matrix from CSR(A)
+    float *h_x = NULL; // a copy of d_x
+    float *h_b = NULL; // b = ones(m,1)
+    float *h_r = NULL; // r = b - A*x, a copy of d_r
+    float *h_tr = NULL;
 
-    double *d_A = NULL; // a copy of h_A
-    double *d_x = NULL; // x = A \ b
-    double *d_b = NULL; // a copy of h_b
-    double *d_r = NULL; // r = b - A*x
-    double *d_tr = NULL; // tr = Atb - AtA*x
+    float *d_A = NULL; // a copy of h_A
+    float *d_x = NULL; // x = A \ b
+    float *d_b = NULL; // a copy of h_b
+    float *d_r = NULL; // r = b - A*x
+    float *d_tr = NULL; // tr = Atb - AtA*x
 
     // the constants are used in residual evaluation, r = b - A*x
-    const double minus_one = -1.0;
-    const double one = 1.0;
+    const float minus_one = -1.0;
+    const float one = 1.0;
 
-    double x_inf = 0.0;
-    double r_inf = 0.0;
-    double A_inf = 0.0;
-    double b_inf = 0.0;
-    double Ax_inf = 0.0;
-    double tr_inf = 0.0;
+    float x_inf = 0.0;
+    float r_inf = 0.0;
+    float A_inf = 0.0;
+    float b_inf = 0.0;
+    float Ax_inf = 0.0;
+    float tr_inf = 0.0;
     int errors = 0;
 
     parseCommandLineArguments(argc, argv, opts);
@@ -472,19 +468,12 @@ int main (int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    if (loadMMSparseMatrix<double>(opts.sparse_mat_filename, 'd', true , &rowsA, &colsA,
+    if (loadMMSparseMatrix<float>(opts.sparse_mat_filename, 's', true , &rowsA, &colsA,
                &nnzA, &h_csrValA, &h_csrRowPtrA, &h_csrColIndA, true))
     {
         exit(EXIT_FAILURE);
     }
     baseA = h_csrRowPtrA[0]; // baseA = {0,1}
-
-    // if (loadMMSparseMatrix<double>(opts.sparse_mat_filename, 'd', true , &rowsA, &colsA,
-    //            &nnzA, &h_cscValA, &h_cscColPtrA, &h_cscRowIndA,  true))
-    // {
-    //     exit(EXIT_FAILURE);
-    // }
-    // baseA = h_cscColPtrA[0]; // baseA = {0,1}
 
     printf("sparse matrix A is %d x %d with %d nonzeros, base=%d\n", rowsA, colsA, nnzA, baseA);
 
@@ -502,58 +491,30 @@ int main (int argc, char *argv[])
         fprintf(stderr, "Error: lda must be greater or equal to dimension of A\n");
         exit(EXIT_FAILURE);
     }
-    //printf("%d\n",lda);
 
-    h_A = (double*)malloc(sizeof(double)*lda*colsA);
-    h_x = (double*)malloc(sizeof(double)*colsA);
-    h_b = (double*)malloc(sizeof(double)*rowsA);
-    h_r = (double*)malloc(sizeof(double)*rowsA);
-    h_tr = (double*)malloc(sizeof(double)*colsA);
+    h_A = (float*)malloc(sizeof(float)*lda*colsA);
+    h_x = (float*)malloc(sizeof(float)*colsA);
+    h_b = (float*)malloc(sizeof(float)*rowsA);
+    h_r = (float*)malloc(sizeof(float)*rowsA);
+    h_tr = (float*)malloc(sizeof(float)*colsA);
     assert(NULL != h_A);
     assert(NULL != h_x);
     assert(NULL != h_b);
     assert(NULL != h_r);
 
-    memset(h_A, 0, sizeof(double)*lda*colsA);
+    memset(h_A, 0, sizeof(float)*lda*colsA);
 
-    // for(int row = 0 ; row < rowsA ; row++)
-    // {
-    //     const int start = h_csrRowPtrA[row  ] - baseA;
-    //     const int end   = h_csrRowPtrA[row+1] - baseA;
-    //     for(int colidx = start ; colidx < end ; colidx++)
-    //     {
-    //         const int col = h_csrColIndA[colidx] - baseA;
-    //         const double Areg = h_csrValA[colidx];
-    //        // h_A[row + col*lda] = Areg;
-    //         h_A[col + colsA*row] = Areg
-    //     }
-    // }
     for(int row = 0 ; row < rowsA ; row++)
     {
-        const int start = h_csrRowPtrA[row  ]-baseA;
-        const int end   = h_csrRowPtrA[row+1]-baseA;
+        const int start = h_csrRowPtrA[row  ] - baseA;
+        const int end   = h_csrRowPtrA[row+1] - baseA;
         for(int colidx = start ; colidx < end ; colidx++)
         {
-            const int col = h_csrColIndA[colidx]-baseA;
-            const double Areg = h_csrValA[colidx];
-            //h_A[row + col*lda] = Areg;
-            h_A[col + colsA*row] = Areg;  //row major order, should be wrong
+            const int col = h_csrColIndA[colidx] - baseA;
+            const float Areg = h_csrValA[colidx];
+            h_A[row + col*lda] = Areg;
         }
     }
-    // for(int col = 0 ; col < colsA ; col++)
-    // {
-    //     const int start = h_cscColPtrA[col  ];
-    //     const int end   = h_cscColPtrA[col+1];
-    //     printf("%d\n", start);
-    //     for(int rowidx = start ; rowidx < end ; rowidx++)
-    //     {
-    //         const int row = h_cscRowIndA[rowidx];
-    //         const double Areg = h_cscValA[rowidx];
-    //        // h_A[row + col*lda] = Areg;
-    //         h_A[col + colsA*(row)] = Areg;
-    //     }
-    // }
-
 
     printf("step 3: set right hand side vector (b) to 1\n");
     for(int row = 0 ; row < rowsA ; row++)
@@ -569,8 +530,8 @@ int main (int argc, char *argv[])
     //     {
     //         for(int i = j ; i < rowsA ; i++)
     //         {
-    //             double Aij = h_A[i + j*lda];
-    //             double Aji = h_A[j + i*lda];
+    //             float Aij = h_A[i + j*lda];
+    //             float Aji = h_A[j + i*lda];
     //             if ( Aij != Aji )
     //             {
     //                 issym = 0;
@@ -593,39 +554,37 @@ int main (int argc, char *argv[])
     checkCudaErrors(cublasSetStream(cublasHandle, stream));
 
 
-    checkCudaErrors(cudaMalloc((void **)&d_A, sizeof(double)*lda*colsA));
-    checkCudaErrors(cudaMalloc((void **)&d_x, sizeof(double)*colsA));
-    checkCudaErrors(cudaMalloc((void **)&d_b, sizeof(double)*rowsA));
-    checkCudaErrors(cudaMalloc((void **)&d_r, sizeof(double)*rowsA));
-    checkCudaErrors(cudaMalloc((void **)&d_tr, sizeof(double)*rowsA));
+    checkCudaErrors(cudaMalloc((void **)&d_A, sizeof(float)*lda*colsA));
+    checkCudaErrors(cudaMalloc((void **)&d_x, sizeof(float)*colsA));
+    checkCudaErrors(cudaMalloc((void **)&d_b, sizeof(float)*rowsA));
+    checkCudaErrors(cudaMalloc((void **)&d_r, sizeof(float)*rowsA));
+    checkCudaErrors(cudaMalloc((void **)&d_tr, sizeof(float)*rowsA));
 
     printf("step 4: prepare data on device\n");
-    checkCudaErrors(cudaMemcpy(d_A, h_A, sizeof(double)*lda*colsA, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_b, h_b, sizeof(double)*rowsA, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_A, h_A, sizeof(float)*lda*colsA, cudaMemcpyHostToDevice));
+    checkCudaErrors(cudaMemcpy(d_b, h_b, sizeof(float)*rowsA, cudaMemcpyHostToDevice));
 
     printf("step 6: compute AtA \n");
     cublasStatus_t cbstat;
-    double al =1.0;// al =1
-    double bet =0.0;// bet =0
-    //double* dAcopy;
-    double* dAtA;
-    //checkCudaErrors(cudaMalloc(&dAcopy, sizeof(double)*lda*colsA));
-    checkCudaErrors(cudaMalloc(&dAtA, sizeof(double)*colsA*colsA));
-    //checkCudaErrors(cudaMemcpy(dAcopy, d_A, sizeof(double)*lda*colsA, cudaMemcpyDeviceToDevice));
-    //cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,rowsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
-    cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,colsA,rowsA,&al,d_A,rowsA,d_A,rowsA,&bet,dAtA,colsA);
-
-    //checkCudaErrors(cudaDeviceSynchronize());
+    float al =1.0f;// al =1
+    float bet =0.0f;// bet =0
+    //float* dAcopy;
+    float* dAtA;
+    //checkCudaErrors(cudaMalloc(&dAcopy, sizeof(float)*lda*colsA));
+    checkCudaErrors(cudaMalloc(&dAtA, sizeof(float)*colsA*colsA));
+    //checkCudaErrors(cudaMemcpy(dAcopy, d_A, sizeof(float)*lda*colsA, cudaMemcpyDeviceToDevice));
+    cbstat = cublasSgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,colsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
+    checkCudaErrors(cudaDeviceSynchronize());
 
     //if (dAcopy) { checkCudaErrors(cudaFree(dAcopy)); }
 
     printf("step 7: compute At*b \n");
-    double* d_Atb;
-    checkCudaErrors(cudaMalloc((void **)&d_Atb, sizeof(double)*colsA));
-    cbstat = cublasDgemv(cublasHandle,CUBLAS_OP_T,colsA,colsA,&al,d_A,colsA,d_b,1,&bet,d_Atb,1);
+    float* d_Atb;
+    checkCudaErrors(cudaMalloc((void **)&d_Atb, sizeof(float)*colsA));
+    cbstat = cublasSgemv(cublasHandle,CUBLAS_OP_T,colsA,colsA,&al,d_A,colsA,d_b,1,&bet,d_Atb,1);
     // if (d_b) { checkCudaErrors(cudaFree(d_b)); }
     // if (d_A) { checkCudaErrors(cudaFree(d_A)); }
-    //checkCudaErrors(cudaDeviceSynchronize());
+    checkCudaErrors(cudaDeviceSynchronize());
 
     printf("step 8: solves AtA*x = At*b \n");
 
@@ -648,10 +607,10 @@ int main (int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     printf("step 9: evaluate residual\n");
-    checkCudaErrors(cudaMemcpy(d_r, d_b, sizeof(double)*rowsA, cudaMemcpyDeviceToDevice));
-    checkCudaErrors(cudaMemcpy(d_tr, d_Atb, sizeof(double)*colsA, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(d_r, d_b, sizeof(float)*rowsA, cudaMemcpyDeviceToDevice));
+    checkCudaErrors(cudaMemcpy(d_tr, d_Atb, sizeof(float)*colsA, cudaMemcpyDeviceToDevice));
     // r = b - A*x
-    checkCudaErrors(cublasDgemm_v2(
+    checkCudaErrors(cublasSgemm_v2(
         cublasHandle,
         CUBLAS_OP_N,
         CUBLAS_OP_N,
@@ -666,7 +625,7 @@ int main (int argc, char *argv[])
         &one,
         d_r,
         rowsA));
-    checkCudaErrors(cublasDgemm_v2(
+    checkCudaErrors(cublasSgemm_v2(
         cublasHandle,
         CUBLAS_OP_N,
         CUBLAS_OP_N,
@@ -682,16 +641,16 @@ int main (int argc, char *argv[])
         d_tr,
         colsA));
 //asd
-    checkCudaErrors(cudaMemcpy(h_x, d_x, sizeof(double)*colsA, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(h_r, d_r, sizeof(double)*rowsA, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(h_tr, d_tr, sizeof(double)*colsA, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_x, d_x, sizeof(float)*colsA, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_r, d_r, sizeof(float)*rowsA, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_tr, d_tr, sizeof(float)*colsA, cudaMemcpyDeviceToHost));
     b_inf = vec_norminf(rowsA, h_b);
     x_inf = vec_norminf(colsA, h_x);
     r_inf = vec_norminf(rowsA, h_r);
     r_inf = vec_norminf(colsA, h_tr);
     A_inf = mat_norminf(rowsA, colsA, h_A, lda);
 
-    //printArray(h_x, colsA);
+    printArray(h_x, colsA);
     printf("|b - A*x| = %E \n", r_inf);
     printf("|Atb - AtA*x| = %E \n", tr_inf);
     printf("|A| = %E \n", A_inf);
@@ -706,9 +665,6 @@ int main (int argc, char *argv[])
     if (h_csrValA   ) { free(h_csrValA); }
     if (h_csrRowPtrA) { free(h_csrRowPtrA); }
     if (h_csrColIndA) { free(h_csrColIndA); }
-    // if (h_cscValA   ) { free(h_cscValA); }
-    // if (h_cscColPtrA) { free(h_cscColPtrA); }
-    // if (h_cscRowIndA) { free(h_cscRowIndA); }
 
     if (h_A) { free(h_A); }
     if (h_x) { free(h_x); }
