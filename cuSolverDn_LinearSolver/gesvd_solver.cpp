@@ -2,7 +2,7 @@
  * How to compile (assume cuda is installed at /usr/local/cuda/)
  * nvcc -c -I/usr/local/cuda/include gesvd_solver.cpp 
  * g++ -fopenmp -o svdSolver gesvd_solver.o -L/usr/local/cuda/lib64 -lcudart -lcublas -lcusolver 
- * 
+ * Sparse solver see cusolverSpDcsreigvsi
  */ 
 #include <stdio.h> 
 #include <stdlib.h> 

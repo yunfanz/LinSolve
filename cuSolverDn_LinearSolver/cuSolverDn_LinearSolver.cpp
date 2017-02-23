@@ -205,7 +205,135 @@ int linearSolverLU(
     return 0;
 }
 
+// __global__ void initSIGPU(double *SI, double *SDiag, int numR, int numC) {
+//     int x = blockDim.x*blockIdx.x + threadIdx.x;
+//     int y = blockDim.y*blockIdx.y + threadIdx.y;
+//     if(y < numR && x < numC) {
+//           if(x == y)
+//               SI[y+numR*x] = SDiag[x];
+//           else
+//               SI[y+numR*x] = 0;
+//     }
+// }
 
+int initSICPU(double *SI, double *SDiag, int numR, int numC, double epsilon)
+{
+    double *h_SI = NULL; double *h_S = NULL;
+    double val;
+    h_SI = (double*)malloc(sizeof(double)*numR*numC);
+    h_S = (double*)malloc(sizeof(double)*numC);
+    checkCudaErrors(cudaMemcpy(h_S, SDiag, sizeof(double)*numC, cudaMemcpyDeviceToHost));
+    memset(h_SI, 0, sizeof(double)*numC*numR);
+
+    int maxInd = (numC<numR) ? numC : numR;
+    for(int ind = 0 ; ind < maxInd ; ind++)
+    {
+        val = ((h_S[ind])>epsilon) ? 1./(h_S[ind]) : 0.0;
+        h_SI[ind + ind*numR] = val;
+    }
+    checkCudaErrors(cudaMemcpy(SI, h_SI, sizeof(double)*numR*numC, cudaMemcpyHostToDevice));
+
+    if (h_S) { free(h_S); }
+    if (h_SI) { free(h_SI); }
+
+    return 0;
+}
+
+
+
+
+int linearSolverSVD(
+    cusolverDnHandle_t handle, 
+    int n,
+    const double *Acopy,
+    int lda,
+    const double *bcopy,
+    double *x)
+{
+    cublasHandle_t cublasHandle = NULL; // used in residual evaluation
+    int m = lda;
+    int bufferSize = 0;
+    int *info = NULL;
+    int h_info = 0;
+    double start, stop;
+    double time_solve;
+    const double one = 1.0;
+
+    // double U[lda*m]; // m-by-m unitary matrix 
+    // double VT[lda*n]; // n-by-n unitary matrix
+    // double S[n]; //singular value 
+    double *d_A = NULL; double *d_SI = NULL; 
+    double *d_b = NULL; double *d_S = NULL; 
+    double *d_U = NULL; double *d_VT = NULL; 
+    double *d_work = NULL; 
+    double *d_rwork = NULL; 
+    double *d_W = NULL; 
+    signed char jobu = 'A'; // all m columns of U 
+    signed char jobvt = 'A'; // all n columns of VT 
+    // step 1: create cusolverDn/cublas handle 
+    checkCudaErrors(cublasCreate(&cublasHandle)); 
+
+    checkCudaErrors(cudaMalloc((void**)&d_A , sizeof(double)*lda*n)); \
+    checkCudaErrors(cudaMalloc((void**)&d_b , sizeof(double)*m)); 
+    checkCudaErrors(cudaMalloc((void**)&d_S , sizeof(double)*n)); 
+    checkCudaErrors(cudaMalloc((void**)&d_SI , sizeof(double)*lda*n)); 
+    checkCudaErrors(cudaMalloc((void**)&d_U , sizeof(double)*lda*m)); 
+    checkCudaErrors(cudaMalloc((void**)&d_VT , sizeof(double)*lda*n)); 
+    checkCudaErrors(cudaMalloc((void**)&info, sizeof(int))); 
+    checkCudaErrors(cudaMalloc((void**)&d_W , sizeof(double)*lda*n));
+    checkCudaErrors(cudaMemcpy(d_A, Acopy, sizeof(double)*lda*n, cudaMemcpyDeviceToDevice)); //gesvd destroys d_A on exit
+    checkCudaErrors(cudaMemcpy(d_b, bcopy, sizeof(double)*m, cudaMemcpyDeviceToDevice));
+
+    checkCudaErrors(cusolverDnDgesvd_bufferSize( handle, m, n, &bufferSize ));
+    checkCudaErrors(cudaMalloc((void**)&d_work , sizeof(double)*bufferSize));
+
+    start = second();
+
+    checkCudaErrors(cusolverDnDgesvd( 
+        handle, jobu, jobvt, m, n, d_A, lda, d_S, d_U, lda, d_VT, lda, d_work, bufferSize, d_rwork, info));
+    //checkCudaErrors(cudaDeviceSynchronize());
+
+    // checkCudaErrors(cudaMemcpy(U , d_U , sizeof(double)*lda*m, cudaMemcpyDeviceToHost)); 
+    // checkCudaErrors(cudaMemcpy(VT, d_VT, sizeof(double)*lda*n, cudaMemcpyDeviceToHost)); 
+    // checkCudaErrors(cudaMemcpy(S , d_S , sizeof(double)*n , cudaMemcpyDeviceToHost)); 
+    checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
+
+    if ( 0 != h_info ){
+        fprintf(stderr, "Error: SVD failed, check %d parameter\n", h_info);
+    }
+
+    // int BLOCK_DIM_X = 32; int BLOCK_DIM_Y = 32;
+    // dim3 blockDim(BLOCK_DIM_X, BLOCK_DIM_Y);  
+    // dim3 gridDim((n + BLOCK_DIM_X - 1) / BLOCK_DIM_X, (m + BLOCK_DIM_Y - 1) / BLOCK_DIM_Y);
+    // initSIGPU<<<gridDim, blockDim>>>(d_SI, d_S, m, n);
+    double epsilon = 1e-8;
+    int initStat = initSICPU(d_SI, d_S, m, n, epsilon);
+    // U*S*VT*x=b; x = V*Si*UT*b
+    double al = 1.0;// al =1
+    double bet = 1.0;// bet =0
+    checkCudaErrors(cublasDgemv(cublasHandle,CUBLAS_OP_T, m, m, &al,d_U, m, d_b,1,&bet,d_b,1));
+    checkCudaErrors(cublasDgemv(cublasHandle,CUBLAS_OP_T, n, m, &al,d_SI, m, d_b,1,&bet,d_b,1));
+    checkCudaErrors(cublasDgemv(cublasHandle,CUBLAS_OP_T, n, n, &al,d_VT, n, x, 1,&bet,d_b,1));
+    checkCudaErrors(cudaDeviceSynchronize());
+    stop = second();
+    time_solve = stop - start; 
+    fprintf (stdout, "timing: SVD = %10.6f sec\n", time_solve);
+
+    if (d_A ) cudaFree(d_A); 
+    if (d_S ) cudaFree(d_S); 
+    if (d_SI ) cudaFree(d_SI);
+    if (d_U ) cudaFree(d_U); 
+    if (d_VT ) cudaFree(d_VT); 
+    if (info) cudaFree(info); 
+    if (d_work ) cudaFree(d_work); 
+    if (d_rwork) cudaFree(d_rwork); 
+    if (d_W ) cudaFree(d_W); 
+    if (cublasHandle ) cublasDestroy(cublasHandle); 
+    // if (cusolverH) cusolverDnDestroy(cusolverH); 
+    return 0;
+
+
+}
 /*
  *  solve A*x = b by QR
  *
@@ -271,7 +399,7 @@ int linearSolverQR(
     checkCudaErrors(cudaMemcpy(&h_info, info, sizeof(int), cudaMemcpyDeviceToHost));
 
     if ( 0 != h_info ){
-        fprintf(stderr, "Error: LU factorization failed, check %d parameter\n", h_info);
+        fprintf(stderr, "Error: QR factorization failed, check %d parameter\n", h_info);
     }
 
     checkCudaErrors(cudaMemcpy(x, b, sizeof(double)*n, cudaMemcpyDeviceToDevice));
@@ -339,7 +467,7 @@ void parseCommandLineArguments(int argc, char *argv[], struct testOpts &opts)
 
         if (solverType)
         {
-            if ((STRCASECMP(solverType, "chol") != 0) && (STRCASECMP(solverType, "lu") != 0) && (STRCASECMP(solverType, "qr") != 0))
+            if ((STRCASECMP(solverType, "svd") != 0) && (STRCASECMP(solverType, "chol") != 0) && (STRCASECMP(solverType, "lu") != 0) && (STRCASECMP(solverType, "qr") != 0))
             {
                 printf("\nIncorrect argument passed to -R option\n");
                 UsageDN();
@@ -394,6 +522,7 @@ int is_symmetric(double* h_A, int colsA, int rowsA, int lda)
         printf("A has no symmetric pattern, please use LU or QR \n");
         exit(EXIT_FAILURE);
     } 
+    return issym;
 }
 
 int main (int argc, char *argv[])
@@ -606,14 +735,14 @@ int main (int argc, char *argv[])
     printf("step 6: compute AtA \n");
     cublasStatus_t cbstat;
     double al =1.0;// al =1
-    double bet =0.0;// bet =0
+    double bet =1.0;// bet =0
     //double* dAcopy;
     double* dAtA;
     //checkCudaErrors(cudaMalloc(&dAcopy, sizeof(double)*lda*colsA));
     checkCudaErrors(cudaMalloc(&dAtA, sizeof(double)*colsA*colsA));
     //checkCudaErrors(cudaMemcpy(dAcopy, d_A, sizeof(double)*lda*colsA, cudaMemcpyDeviceToDevice));
     //cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,rowsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
-    cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,colsA,rowsA,&al,d_A,rowsA,d_A,rowsA,&bet,dAtA,colsA);
+    cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,rowsA,colsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
 
     //checkCudaErrors(cudaDeviceSynchronize());
 
@@ -630,7 +759,11 @@ int main (int argc, char *argv[])
     printf("step 8: solves AtA*x = At*b \n");
 
     // d_A and d_b are read-only
-    if ( 0 == strcmp(opts.testFunc, "chol") )
+    if ( 0 == strcmp(opts.testFunc, "svd") )
+    {
+        linearSolverSVD(handle, colsA, dAtA, colsA, d_Atb, d_x);
+    }
+    else if ( 0 == strcmp(opts.testFunc, "chol") )
     {
         linearSolverCHOL(handle, colsA, dAtA, colsA, d_Atb, d_x);
     }
@@ -714,11 +847,13 @@ int main (int argc, char *argv[])
     if (h_x) { free(h_x); }
     if (h_b) { free(h_b); }
     if (h_r) { free(h_r); }
+    if (h_tr) { free(h_tr); }
 
     if (d_A) { checkCudaErrors(cudaFree(d_A)); }
     if (d_x) { checkCudaErrors(cudaFree(d_x)); }
     if (d_b) { checkCudaErrors(cudaFree(d_b)); }
     if (d_r) { checkCudaErrors(cudaFree(d_r)); }
+    if (d_tr) { checkCudaErrors(cudaFree(d_tr)); }
 
     return 0;
 }
