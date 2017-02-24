@@ -244,14 +244,14 @@ ALL_LDFLAGS += $(addprefix -Xlinker ,$(LDFLAGS))
 ALL_LDFLAGS += $(addprefix -Xlinker ,$(EXTRA_LDFLAGS))
 
 # Common includes and paths for CUDA
-INCLUDES  := -I./cuda_inc
+INCLUDES  := -I/usr/local/cuda/include -I./cuda_inc 
 LIBRARIES :=
 
 ################################################################################
 
 # Gencode arguments
-SMS ?= 20 30 35 37 50 52 60
-
+# SMS ?= 20 30 35 37 50 52 60
+SMS ?= 61
 ifeq ($(SMS),)
 $(info >>> WARNING - no SM architectures have been specified - waiving sample <<<)
 SAMPLE_ENABLED := 0
@@ -279,7 +279,7 @@ endif
 # Target rules
 all: build
 
-build: cuSolverDn_LinearSolver
+build: cuSolverDn_Axb cuSolverDn_AtA 
 
 check.deps:
 ifeq ($(SAMPLE_ENABLED),0)
@@ -288,7 +288,11 @@ else
 	@echo "Sample is ready - all dependencies have been met"
 endif
 
-cuSolverDn_LinearSolver.o:cuSolverDn_LinearSolver.cpp
+initSI.o:initSI.cu
+	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+cuSolverDn_AtA.o:cuSolverDn_AtA.cpp
+	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+cuSolverDn_Axb.o:cuSolverDn_Axb.cpp
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
 mmio.c.o:mmio.c
@@ -297,16 +301,20 @@ mmio.c.o:mmio.c
 mmio_wrapper.o:mmio_wrapper.cpp
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-cuSolverDn_LinearSolver: cuSolverDn_LinearSolver.o mmio.c.o mmio_wrapper.o
+cuSolverDn_AtA: cuSolverDn_AtA.o mmio.c.o mmio_wrapper.o initSI.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
-	$(EXEC) mkdir -p ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
-	$(EXEC) cp $@ ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
-
+	$(EXEC) mkdir -p ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
+	$(EXEC) cp $@ ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
+cuSolverDn_Axb: cuSolverDn_Axb.o mmio.c.o mmio_wrapper.o initSI.o
+	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
+	$(EXEC) mkdir -p ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
+	$(EXEC) cp $@ ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 run: build
-	$(EXEC) ./cuSolverDn_LinearSolver
+	$(EXEC) ./cuSolverDn_AtA
+	$(EXEC) ./cuSolverDn_Axb
 
 clean:
 	rm -f cuSolverDn_LinearSolver cuSolverDn_LinearSolver.o mmio.c.o mmio_wrapper.o
-	rm -rf ../../bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)/cuSolverDn_LinearSolver
+	rm -rf ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)/cuSolverDn_LinearSolver
 
 clobber: clean
