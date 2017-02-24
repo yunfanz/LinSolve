@@ -294,18 +294,21 @@ cuSolverDn_AtA.o:cuSolverDn_AtA.cpp
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 cuSolverDn_Axb.o:cuSolverDn_Axb.cpp
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
-
+culib_kernels.o: culib_kernels.cpp
+	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+utilities.o: utilities.cpp
+	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 mmio.c.o:mmio.c
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
 mmio_wrapper.o:mmio_wrapper.cpp
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
-cuSolverDn_AtA: cuSolverDn_AtA.o mmio.c.o mmio_wrapper.o initSI.o
+cuSolverDn_AtA: cuSolverDn_AtA.o mmio.c.o mmio_wrapper.o initSI.o utilities.o culib_kernels.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 	$(EXEC) mkdir -p ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 	$(EXEC) cp $@ ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
-cuSolverDn_Axb: cuSolverDn_Axb.o mmio.c.o mmio_wrapper.o initSI.o
+cuSolverDn_Axb: cuSolverDn_Axb.o mmio.c.o mmio_wrapper.o initSI.o utilities.o culib_kernels.o
 	$(EXEC) $(NVCC) $(ALL_LDFLAGS) $(GENCODE_FLAGS) -o $@ $+ $(LIBRARIES)
 	$(EXEC) mkdir -p ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
 	$(EXEC) cp $@ ./bin/$(TARGET_ARCH)/$(TARGET_OS)/$(BUILD_TYPE)
