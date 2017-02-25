@@ -1,4 +1,3 @@
-
 /*
  * Copyright 2015 NVIDIA Corporation.  All rights reserved.
  *
@@ -555,7 +554,9 @@ int main (int argc, char *argv[])
     struct testOpts opts;
     cusolverDnHandle_t handle = NULL;
     cublasHandle_t cublasHandle = NULL; // used in residual evaluation
-    cudaStream_t stream = NULL;
+    //cudaStream_t stream = NULL;
+    cudaStream_t *streamArray = 0;
+    int nstreams = 4;
 
     int rowsA = 0; // number of rows of A
     int colsA = 0; // number of columns of A
@@ -578,11 +579,11 @@ int main (int argc, char *argv[])
     float *h_r = NULL; // r = b - A*x, a copy of d_r
     float *h_tr = NULL;
 
-    float *d_A = NULL; // a copy of h_A
-    float *d_x = NULL; // x = A \ b
-    float *d_b = NULL; // a copy of h_b
-    float *d_r = NULL; // r = b - A*x
-    float *d_tr = NULL; // tr = Atb - AtA*x
+    float **d_A = NULL; // a copy of h_A
+    float **d_x = NULL; // x = A \ b
+    float **d_b = NULL; // a copy of h_b
+    float **d_r = NULL; // r = b - A*x
+    float **d_tr = NULL; // tr = Atb - AtA*x
 
     // the constants are used in residual evaluation, r = b - A*x
     const float minus_one = -1.0;
@@ -740,116 +741,136 @@ int main (int argc, char *argv[])
     //     }
     // }
 
+    d_A =(float **)malloc(nstreams * sizeof(*d_A));
+    d_x =(float **)malloc(nstreams * sizeof(*d_x));
+    d_b =(float **)malloc(nstreams * sizeof(*d_b));
+    d_r =(float **)malloc(nstreams * sizeof(*d_r));
+    d_tr =(float **)malloc(nstreams * sizeof(*d_tr));
     checkCudaErrors(cusolverDnCreate(&handle));
     checkCudaErrors(cublasCreate(&cublasHandle));
-    checkCudaErrors(cudaStreamCreate(&stream));
-
-    checkCudaErrors(cusolverDnSetStream(handle, stream));
-    checkCudaErrors(cublasSetStream(cublasHandle, stream));
-
-
-    checkCudaErrors(cudaMalloc((void **)&d_A, sizeof(float)*lda*colsA));
-    checkCudaErrors(cudaMalloc((void **)&d_x, sizeof(float)*colsA));
-    checkCudaErrors(cudaMalloc((void **)&d_b, sizeof(float)*rowsA));
-    checkCudaErrors(cudaMalloc((void **)&d_r, sizeof(float)*rowsA));
-    checkCudaErrors(cudaMalloc((void **)&d_tr, sizeof(float)*rowsA));
-
-    printf("step 4: prepare data on device\n");
-    checkCudaErrors(cudaMemcpy(d_A, h_A, sizeof(float)*lda*colsA, cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemcpy(d_b, h_b, sizeof(float)*rowsA, cudaMemcpyHostToDevice));
-
-    printf("step 6: compute AtA \n");
-    cublasStatus_t cbstat;
+    
+    streamArray = (cudaStream_t *)malloc(nstreams * sizeof(cudaStream_t *));
+    float** dAtA;
+    float** d_Atb;
+    dAtA = (float **)malloc(nstreams * sizeof(float *));
+    d_Atb = (float **)malloc(nstreams * sizeof(float *));
     float al =1.0;// al =1
     float bet =0.0;// bet =0
-    //float* dAcopy;
-    float* dAtA;
-    //checkCudaErrors(cudaMalloc(&dAcopy, sizeof(float)*lda*colsA));
-    checkCudaErrors(cudaMalloc(&dAtA, sizeof(float)*colsA*colsA));
-    //checkCudaErrors(cudaMemcpy(dAcopy, d_A, sizeof(float)*lda*colsA, cudaMemcpyDeviceToDevice));
-    //cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,rowsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
-    cbstat = cublasSgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,colsA,rowsA,&al,d_A,rowsA,d_A,rowsA,&bet,dAtA,colsA);
-
-    //checkMatrix(colsA, colsA, dAtA, colsA, "hAtA");
-
-    //checkCudaErrors(cudaDeviceSynchronize());
-
-    //if (dAcopy) { checkCudaErrors(cudaFree(dAcopy)); }
-
-    printf("step 7: compute At*b \n");
-    float* d_Atb;
-    checkCudaErrors(cudaMalloc((void **)&d_Atb, sizeof(float)*colsA));
-    cbstat = cublasSgemv(cublasHandle,CUBLAS_OP_T,colsA,colsA,&al,d_A,colsA,d_b,1,&bet,d_Atb,1);
-    //checkArray(d_Atb, colsA, "Atb");
-    //if (d_b) { checkCudaErrors(cudaFree(d_b)); }
-    //if (d_A) { checkCudaErrors(cudaFree(d_A)); }
-    //checkCudaErrors(cudaDeviceSynchronize());
-
-    if (cublasHandle) { checkCudaErrors(cublasDestroy(cublasHandle)); }
-    checkCudaErrors(cublasCreate(&cublasHandle));
-    checkCudaErrors(cublasSetStream(cublasHandle, stream));
-    printf("step 8: solves AtA*x = At*b \n");
-
-    // d_A and d_b are read-only
-    if ( 0 == strcmp(opts.testFunc, "svd") )
+    for (int ii = 0; ii < 1000 ; ii++)
     {
-        linearSolverSVD(handle, colsA, dAtA, colsA, d_Atb, d_x);
+        for (int i = 0; i < nstreams ; i++)
+        {
+            checkCudaErrors(cudaStreamCreate(&streamArray[i]));
+            checkCudaErrors(cudaMalloc((void **)&d_A[i], sizeof(float)*lda*colsA));
+            checkCudaErrors(cudaMalloc((void **)&d_x[i], sizeof(float)*colsA));
+            checkCudaErrors(cudaMalloc((void **)&d_b[i], sizeof(float)*rowsA));
+            checkCudaErrors(cudaMalloc((void **)&d_r[i], sizeof(float)*rowsA));
+            checkCudaErrors(cudaMalloc((void **)&d_tr[i], sizeof(float)*rowsA));
+        }
+        for (int i = 0; i < nstreams ; i++)
+        {
+
+            checkCudaErrors(cusolverDnSetStream(handle, streamArray[i]));
+            checkCudaErrors(cublasSetStream(cublasHandle, streamArray[i]));
+
+
+            checkCudaErrors(cudaMemcpy(d_A[i], h_A, sizeof(float)*lda*colsA, cudaMemcpyHostToDevice));
+            checkCudaErrors(cudaMemcpy(d_b[i], h_b, sizeof(float)*rowsA, cudaMemcpyHostToDevice));
+
+            cublasStatus_t cbstat;
+
+            //float* dAcopy;
+            
+            //checkCudaErrors(cudaMalloc(&dAcopy, sizeof(float)*lda*colsA));
+            checkCudaErrors(cudaMalloc(&dAtA[i], sizeof(float)*colsA*colsA));
+            //checkCudaErrors(cudaMemcpy(dAcopy, d_A, sizeof(float)*lda*colsA, cudaMemcpyDeviceToDevice));
+            //cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,rowsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
+            cbstat = cublasSgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,colsA,rowsA,&al,d_A[i],rowsA,d_A[i],rowsA,&bet,dAtA[i],colsA);
+
+            //checkMatrix(colsA, colsA, dAtA, colsA, "hAtA");
+
+            //checkCudaErrors(cudaDeviceSynchronize());
+
+            //if (dAcopy) { checkCudaErrors(cudaFree(dAcopy)); }
+
+            
+            checkCudaErrors(cudaMalloc((void **)&d_Atb[i], sizeof(float)*colsA));
+            cbstat = cublasSgemv(cublasHandle,CUBLAS_OP_T,colsA,colsA,&al,d_A[i],colsA,d_b[i],1,&bet,d_Atb[i],1);
+ 
+            // d_A and d_b are read-only
+            if ( 0 == strcmp(opts.testFunc, "svd") )
+            {
+                linearSolverSVD(handle, colsA, dAtA[i], colsA, d_Atb[i], d_x[i]);
+            }
+            else if ( 0 == strcmp(opts.testFunc, "chol") )
+            {
+                linearSolverCHOL(handle, colsA, dAtA[i], colsA, d_Atb[i], d_x[i]);
+            }
+            else if ( 0 == strcmp(opts.testFunc, "lu") )
+            {
+                linearSolverLU(handle, colsA, dAtA[i], colsA, d_Atb[i], d_x[i]);
+            }
+            else if ( 0 == strcmp(opts.testFunc, "qr") )
+            {
+                linearSolverQR(handle, colsA, dAtA[i], colsA, d_Atb[i], d_x[i]);
+            }
+            else
+            {
+                fprintf(stderr, "Error: %s is unknown function\n", opts.testFunc);
+                exit(EXIT_FAILURE);
+            }
+            printf("%d, %d\n", i, ii);
+            checkCudaErrors(cudaMemcpy(d_r[i], d_b[i], sizeof(float)*rowsA, cudaMemcpyDeviceToDevice));
+            checkCudaErrors(cudaMemcpy(d_tr[i], d_Atb[i], sizeof(float)*colsA, cudaMemcpyDeviceToDevice));
+            // r = b - A*x
+            checkCudaErrors(cublasSgemm_v2(
+                cublasHandle,
+                CUBLAS_OP_N,
+                CUBLAS_OP_N,
+                rowsA,
+                1,
+                colsA,
+                &minus_one,
+                d_A[i],
+                lda,
+                d_x[i],
+                rowsA,
+                &one,
+                d_r[i],
+                rowsA));
+            checkCudaErrors(cublasSgemm_v2(
+                cublasHandle,
+                CUBLAS_OP_N,
+                CUBLAS_OP_N,
+                colsA,
+                1,
+                colsA,
+                &minus_one,
+                dAtA[i],
+                colsA,
+                d_x[i],
+                colsA,
+                &one,
+                d_tr[i],
+                colsA));
+
+        }
+
+        for ( int i=0; i< nstreams; i++)
+        {
+            if (d_A[i]) { checkCudaErrors(cudaFree(d_A[i])); }
+            if (d_x[i]) { checkCudaErrors(cudaFree(d_x[i])); }
+            if (d_b[i]) { checkCudaErrors(cudaFree(d_b[i])); }
+            if (d_r[i]) { checkCudaErrors(cudaFree(d_r[i])); }
+            if (d_tr[i]) { checkCudaErrors(cudaFree(d_tr[i])); }   
+        }
     }
-    else if ( 0 == strcmp(opts.testFunc, "chol") )
-    {
-        linearSolverCHOL(handle, colsA, dAtA, colsA, d_Atb, d_x);
-    }
-    else if ( 0 == strcmp(opts.testFunc, "lu") )
-    {
-        linearSolverLU(handle, colsA, dAtA, colsA, d_Atb, d_x);
-    }
-    else if ( 0 == strcmp(opts.testFunc, "qr") )
-    {
-        linearSolverQR(handle, colsA, dAtA, colsA, d_Atb, d_x);
-    }
-    else
-    {
-        fprintf(stderr, "Error: %s is unknown function\n", opts.testFunc);
-        exit(EXIT_FAILURE);
-    }
-    printf("step 9: evaluate residual\n");
-    checkCudaErrors(cudaMemcpy(d_r, d_b, sizeof(float)*rowsA, cudaMemcpyDeviceToDevice));
-    checkCudaErrors(cudaMemcpy(d_tr, d_Atb, sizeof(float)*colsA, cudaMemcpyDeviceToDevice));
-    // r = b - A*x
-    checkCudaErrors(cublasSgemm_v2(
-        cublasHandle,
-        CUBLAS_OP_N,
-        CUBLAS_OP_N,
-        rowsA,
-        1,
-        colsA,
-        &minus_one,
-        d_A,
-        lda,
-        d_x,
-        rowsA,
-        &one,
-        d_r,
-        rowsA));
-    checkCudaErrors(cublasSgemm_v2(
-        cublasHandle,
-        CUBLAS_OP_N,
-        CUBLAS_OP_N,
-        colsA,
-        1,
-        colsA,
-        &minus_one,
-        dAtA,
-        colsA,
-        d_x,
-        colsA,
-        &one,
-        d_tr,
-        colsA));
+
+
 //asd
-    checkCudaErrors(cudaMemcpy(h_x, d_x, sizeof(float)*colsA, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(h_r, d_r, sizeof(float)*rowsA, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(h_tr, d_tr, sizeof(float)*colsA, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_x, d_x[0], sizeof(float)*colsA, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_r, d_r[0], sizeof(float)*rowsA, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(h_tr, d_tr[0], sizeof(float)*colsA, cudaMemcpyDeviceToHost));
     b_inf = vec_norminf(rowsA, h_b);
     x_inf = vec_norminf(colsA, h_x);
     r_inf = vec_norminf(rowsA, h_r);
@@ -866,7 +887,10 @@ int main (int argc, char *argv[])
 
     if (handle) { checkCudaErrors(cusolverDnDestroy(handle)); }
     if (cublasHandle) { checkCudaErrors(cublasDestroy(cublasHandle)); }
-    if (stream) { checkCudaErrors(cudaStreamDestroy(stream)); }
+    for (int i = 0; i < nstreams ; i++)
+    {
+        if (streamArray[i]) { checkCudaErrors(cudaStreamDestroy(streamArray[i])); }
+    }
 
     if (h_csrValA   ) { free(h_csrValA); }
     if (h_csrRowPtrA) { free(h_csrRowPtrA); }
@@ -889,3 +913,4 @@ int main (int argc, char *argv[])
 
     return 0;
 }
+
