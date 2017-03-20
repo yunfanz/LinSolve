@@ -2,7 +2,7 @@ import numpy as np
 import ast
 from scipy.sparse import lil_matrix, csr_matrix
 import scipy.sparse.linalg
-
+"""Written by Aaron R. Parsons"""
 def ast_getterms(n):
     '''Convert an AST parse tree into a list of terms.  E.g. 'a*x1+b*x2' -> [[a,x1],[b,x2]]'''
     if type(n) is ast.Name: return [[n.id]]
