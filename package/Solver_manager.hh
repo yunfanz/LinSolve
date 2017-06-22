@@ -61,7 +61,8 @@ public:
 
   void from_csr(int* indptr_, int* indices_, float* data_, float* rhs_);
 
-  void solve(); // does operation inplace on the GPU
+  void solve(int func); // AtA solver for non-square matrices
+  void solve_Axb(int func); // for square matrices, only use qr or lu if non-symmetric
 
   //gets results back from the gpu, putting them in the supplied memory location
   void retrieve_to (float* h_x);

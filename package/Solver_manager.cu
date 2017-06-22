@@ -276,7 +276,7 @@ int linearSolverQR(
         n,
         &bufferSize_ormqr));
 
-    printf("buffer_geqrf = %d, buffer_ormqr = %d \n", bufferSize_geqrf, bufferSize_ormqr);
+    //printf("buffer_geqrf = %d, buffer_ormqr = %d \n", bufferSize_geqrf, bufferSize_ormqr);
     
     bufferSize = (bufferSize_geqrf > bufferSize_ormqr)? bufferSize_geqrf : bufferSize_ormqr ; 
 
@@ -365,6 +365,9 @@ DnSolver::DnSolver (int rows_, int cols_)
     checkCudaErrors(cusolverDnSetStream(handle, stream));
     checkCudaErrors(cublasSetStream(cublasHandle, stream));
 
+    h_A = (float*)malloc(sizeof(float)*lda*colsA);
+    h_x = (float*)malloc(sizeof(float)*colsA);
+    h_b = (float*)malloc(sizeof(float)*rowsA);
 
     checkCudaErrors(cudaMalloc((void **)&d_A, sizeof(float)*lda*colsA));
     checkCudaErrors(cudaMalloc((void **)&d_x, sizeof(float)*colsA));
@@ -385,7 +388,9 @@ void DnSolver::from_csr(int* indptr_, int* indices_, float* data_, float* rhs_){
     h_csrColIndA = indices_;
     h_csrValA = data_;
     baseA = h_csrRowPtrA[0];
-    memset(h_A, 0, sizeof(float)*lda*colsA);
+    
+    //memset(h_A, 0, sizeof(float)*lda*colsA);
+    printf("from_csr: converting to dense\n");
     for(int row = 0 ; row < rowsA ; row++)
     {
         const int start = h_csrRowPtrA[row  ]-baseA;
@@ -401,8 +406,8 @@ void DnSolver::from_csr(int* indptr_, int* indices_, float* data_, float* rhs_){
     checkCudaErrors(cudaMemcpy(d_b, h_b, sizeof(float)*rowsA, cudaMemcpyHostToDevice));
 }
 
-void DnSolver::solve() {
-    printf("step 6: compute AtA \n");
+void DnSolver::solve(int Func) {
+    //printf("step 6: compute AtA \n");
     cublasStatus_t cbstat;
     float al =1.0;// al =1
     float bet =0.0;// bet =0
@@ -414,7 +419,7 @@ void DnSolver::solve() {
     //cbstat = cublasDgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,rowsA,rowsA,&al,d_A,colsA,d_A,rowsA,&bet,dAtA,colsA);
     cbstat = cublasSgemm(cublasHandle,CUBLAS_OP_T,CUBLAS_OP_N,colsA,colsA,rowsA,&al,d_A,rowsA,d_A,rowsA,&bet,dAtA,colsA);
 
-    printf("step 7: compute At*b \n");
+    // printf("step 7: compute At*b \n");
     float* d_Atb;
     checkCudaErrors(cudaMalloc((void **)&d_Atb, sizeof(float)*colsA));
     cbstat = cublasSgemv(cublasHandle,CUBLAS_OP_T,colsA,colsA,&al,d_A,colsA,d_b,1,&bet,d_Atb,1);
@@ -422,16 +427,61 @@ void DnSolver::solve() {
     if (cublasHandle) { checkCudaErrors(cublasDestroy(cublasHandle)); }
     checkCudaErrors(cublasCreate(&cublasHandle));
     checkCudaErrors(cublasSetStream(cublasHandle, stream));
-    printf("step 8: solves AtA*x = At*b \n");
+    //printf("step 8: solves AtA*x = At*b \n");
 
-    linearSolverQR(handle, colsA, dAtA, colsA, d_Atb, d_x);
+    if ( 0 == Func )
+    {
+        linearSolverQR(handle, colsA, dAtA, colsA, d_Atb, d_x);
+    }
+    else if ( 1 == Func )
+    {
+        linearSolverCHOL(handle, colsA, dAtA, colsA, d_Atb, d_x);
+    }
+    else if ( 2 == Func )
+    {
+        linearSolverLU(handle, colsA, dAtA, colsA, d_Atb, d_x);
+    }
+    else if ( 3 == Func )
+    {
+        linearSolverSVD(handle, colsA, dAtA, colsA, d_Atb, d_x);
+    }
+    else
+    {
+        fprintf(stderr, "Error: %d is unknown function\n", Func);
+        exit(EXIT_FAILURE);
+    }
 
 }
+void DnSolver::solve_Axb(int Func) {
 
+
+    if ( 0 == Func )
+    {
+        linearSolverQR(handle, colsA, d_A, colsA, d_b, d_x);
+    }
+    else if ( 1 == Func )
+    {
+        linearSolverCHOL(handle, colsA, d_A, colsA, d_b, d_x);
+    }
+    else if ( 2 == Func )
+    {
+        linearSolverLU(handle, colsA, d_A, colsA, d_b, d_x);
+    }
+    else if ( 3 == Func )
+    {
+        linearSolverSVD(handle, colsA, d_A, colsA, d_b, d_x);
+    }
+    else
+    {
+        fprintf(stderr, "Error: %d is unknown function\n", Func);
+        exit(EXIT_FAILURE);
+    }
+
+}
 void DnSolver::retrieve_to(float* h_x)
 {
     checkCudaErrors(cudaMemcpy(h_x, d_x, sizeof(float)*colsA, cudaMemcpyDeviceToHost));
-    printf("x0 = %E \n", h_x[0]);
+    //printf("x0 = %E \n", h_x[0]);
 }
 
 DnSolver::~DnSolver()
