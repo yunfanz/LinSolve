@@ -16,10 +16,10 @@ class DnSolver{
     int baseA = 0; // base index in CSR format
     int lda   = 0; // leading dimension in dense matrix
 
-    // // CSR(A) from I/O
-    // int *h_csrRowPtrA = NULL;
-    // int *h_csrColIndA = NULL;
-    // float *h_csrValA = NULL;
+    // CSR(A) 
+    int *h_csrRowPtrA = NULL;
+    int *h_csrColIndA = NULL;
+    float *h_csrValA = NULL;
     // // CSC(A) from I/O
     // // int *h_cscColPtrA = NULL;
     // // int *h_cscRowIndA = NULL;
@@ -53,9 +53,13 @@ class DnSolver{
 public:
 
 
-  DnSolver (float* array_host_, float* rhs_, int rows_, int cols_) ; // constructor (copies to GPU)
+  DnSolver (int rows_, int cols_) ; // constructor (copies to GPU)
 
   ~DnSolver(); // destructor
+
+  void from_dense(float* array_host_, float* rhs_);
+
+  void from_csr(int* indptr_, int* indices_, float* data_, float* rhs_);
 
   void solve(); // does operation inplace on the GPU
 

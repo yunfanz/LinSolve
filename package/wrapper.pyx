@@ -6,7 +6,9 @@ cimport numpy as np
 
 cdef extern from "Solver_manager.hh":
     cdef cppclass C_DnSolver "DnSolver":
-        C_DnSolver(np.float32_t*, np.float32_t*, np.int32_t, np.int32_t)
+        C_DnSolver(np.int32_t, np.int32_t)
+        void from_dense(np.float32_t*, np.float32_t*)
+        void from_csr(np.int32_t*, np.int32_t*, np.float32_t*, np.float32_t*)
         void solve()
         void retrieve_to(np.float32_t*)
 
@@ -15,13 +17,18 @@ cdef class DnSolver:
     cdef int rows
     cdef int cols
 
-    def __cinit__(self, np.ndarray[ndim=1, dtype=np.float32_t] arr, np.ndarray[ndim=1,dtype=np.float32_t] rhs, np.int32_t lda):
-        self.rows, self.cols = lda, len(arr)/lda
-        self.g = new C_DnSolver(&arr[0], &rhs[0], self.rows, self.cols)
+    def __cinit__(self,  np.int32_t rows, np.int32_t cols):
+        self.rows, self.cols = rows, cols
+        self.g = new C_DnSolver( self.rows, self.cols)
+
+    def from_dense(self, np.ndarray[ndim=1, dtype=np.float32_t] arr, np.ndarray[ndim=1,dtype=np.float32_t] rhs):
+        self.g.from_dense(&arr[0], &rhs[0])
+
+    def from_csr(self, np.ndarray[ndim=1, dtype=np.int32_t] indptr, np.ndarray[ndim=1, dtype=np.int32_t] indices, np.ndarray[ndim=1,dtype=np.float32_t] data, np.ndarray[ndim=1,dtype=np.float32_t] rhs):
+        self.g.from_csr(&indptr[0], &indices[0], &data[0], &rhs[0])
 
     def solve(self):
         self.g.solve()
-
 
     def retrieve(self):
         cdef np.ndarray[ndim=1, dtype=np.float32_t] x = np.zeros(self.cols, dtype=np.float32)
